@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Medium Özetleyici SaaS (MVP)</title>
+    <style>
+        /* Minimalist CSS */
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f4f4f9;
+            color: #333;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+        }
+        .container {
+            width: 100%;
+            max-width: 800px;
+            background-color: #fff;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+        }
+        h1 {
+            color: #007bff;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        form {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        input[type="url"] {
+            flex-grow: 1;
+            padding: 12px;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            font-size: 16px;
+        }
+        button {
+            padding: 12px 20px;
+            background-color: #28a745;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #218838;
+        }
+        .result-box {
+            margin-top: 20px;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            background-color: #e9ecef;
+            white-space: pre-wrap;
+            min-height: 100px;
+        }
+        .loading {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #007bff;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            display: none;
+            margin: 10px auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .error {
+            color: #dc3545;
+            font-weight: bold;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 Medium Makale Özetleyici (AI Destekli SaaS)</h1>
+        <p>Medium makalesinin URL'sini girin ve yapay zeka tarafından özetlenmiş halini saniyeler içinde alın.</p>
+        
+        <form id="summarizeForm">
+            <input type="url" id="mediumUrl" placeholder="Medium URL'sini buraya yapıştırın (https://medium.com/...)" required>
+            <button type="submit" id="submitButton">Özetle</button>
+        </form>
+
+        <div id="loadingIndicator" class="loading"></div>
+        <p id="errorMessage" class="error"></p>
+        
+        <h2>Özet Sonucu</h2>
+        <div id="summaryResult" class="result-box">
+            Henüz bir özet yapılmadı.
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('summarizeForm').addEventListener('submit', async function(event) {
+            event.preventDefault(); 
+            
+            const url = document.getElementById('mediumUrl').value;
+            const resultBox = document.getElementById('summaryResult');
+            const loading = document.getElementById('loadingIndicator');
+            const errorMsg = document.getElementById('errorMessage');
+            const submitButton = document.getElementById('submitButton');
+
+            // Durumu Temizle ve Yükleniyor'u Göster
+            resultBox.innerHTML = 'İçerik çekiliyor ve yapay zeka özetliyor... Lütfen bekleyin.';
+            errorMsg.textContent = '';
+            loading.style.display = 'block';
+            submitButton.disabled = true; 
+            
+            try {
+                // Backend API'si adresimiz
+                const apiUrl = 'http://127.0.0.1:8000/api/summarize'; 
+
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ url: url })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    const errorMessage = data.detail || 'Bilinmeyen bir hata oluştu.';
+                    errorMsg.textContent = 'Hata: ' + errorMessage + ' (API Durum Kodu: ' + response.status + ')';
+                    resultBox.innerHTML = 'Özetleme başarısız oldu. Lütfen URL’nizi ve sunucuyu kontrol edin.';
+                    console.error('API Hatası:', data);
+                } else {
+                    // Başarılı özetleme durumunda
+                    resultBox.innerHTML = data.summary;
+                }
+
+            } catch (error) {
+                errorMsg.textContent = 'Bağlantı Hatası: Backend API\'sine ulaşılamıyor. Lütfen Uvicorn sunucusunun çalıştığından emin olun.';
+                resultBox.innerHTML = 'Lütfen sunucunun çalıştığından emin olun.';
+                console.error('Fetch Hatası:', error);
+            } finally {
+                loading.style.display = 'none';
+                submitButton.disabled = false; 
+            }
+        });
+    </script>
+</body>
+</html>
