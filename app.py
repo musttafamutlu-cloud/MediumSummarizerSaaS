@@ -10,15 +10,20 @@ import requests
 from bs4 import BeautifulSoup
 import re
 import os
+import random 
 from openai import OpenAI
-import random # 403 hatasını çözmek için eklendi
+import stripe # Stripe Entegrasyonu için
+from passlib.context import CryptContext # Mock şifreleme için
 
-# Veritabanı importu: database.py dosyasının app.py ile AYNI KLASÖRDE olması gerekir.
-from database import SessionLocal, Summary, create_db_tables 
+# Veritabanı importu: database.py dosyasından User modelini de çekiyoruz
+from database import SessionLocal, Summary, User, create_db_tables 
 
 # ----------------------------------------------------
 # 1. BAŞLANGIÇ VE ORTAM AYARLARI
 # ----------------------------------------------------
+
+# Şifreleme (Parola hash'leme) aracı
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 create_db_tables() # Veritabanı tablolarını uygulama başlamadan oluştur
 app = FastAPI()
@@ -42,7 +47,7 @@ app.add_middleware(
 )
 
 # ----------------------------------------------------
-# 3. VERİTABANI BAĞIMLILIĞI
+# 3. VERİTABANI BAĞIMLILIĞI VE KULLANICI YÖNETİMİ
 # ----------------------------------------------------
 
 def get_db():
@@ -52,10 +57,31 @@ def get_db():
     finally:
         db.close()
 
+# Mock Kullanıcı Yetkilendirmesi (Gerçek kullanıcı olmadan test için)
+def get_current_user(db: Session = Depends(get_db)):
+    """API anahtarı kontrolü yerine, ilk kullanıcıyı döndürür."""
+    user = db.query(User).filter(User.id == 1).first()
+    
+    if user is None:
+        # Eğer kullanıcı yoksa, basit bir test kullanıcısı oluştur
+        test_user = User(
+            email="testuser@saas.com",
+            hashed_password=pwd_context.hash("test1234"),
+            remaining_summaries=10 # Ücretsiz deneme hakkı
+        )
+        db.add(test_user)
+        db.commit()
+        db.refresh(test_user)
+        print("🎉 Yeni test kullanıcısı oluşturuldu.")
+        return test_user
+        
+    return user
+
 # ----------------------------------------------------
-# 4. AI İSTEMCİSİ TANIMLAMA
+# 4. AI VE ÖDEME İSTEMCİLERİ
 # ----------------------------------------------------
 
+# AI İstemcisi
 client = None
 try:
     openai_key = os.environ.get("OPENAI_API_KEY")
@@ -67,6 +93,18 @@ try:
 except Exception as e:
     print(f"❌ HATA: OpenAI İstemcisi başlatılırken beklenmedik bir sorun oluştu: {e}")
     client = None
+
+# STRIPE YAPILANDIRMASI
+try:
+    stripe_key = os.environ.get("STRIPE_SECRET_KEY")
+    if stripe_key:
+        stripe.api_key = stripe_key
+        print("✅ Stripe İstemcisi başarıyla yapılandırıldı.")
+    else:
+        print("⚠️ UYARI: STRIPE_SECRET_KEY ortam değişkeni bulunamadı. Ödeme işlemleri çalışmayacaktır.")
+except Exception as e:
+    print(f"❌ HATA: Stripe yapılandırılırken beklenmedik bir sorun oluştu: {e}")
+
 
 # ----------------------------------------------------
 # 5. METİN ÇIKARMA FONKSİYONU (Web Scraping - 403 Çözümü)
@@ -83,7 +121,6 @@ def extract_medium_text(url: str) -> str:
     ]
 
     try:
-        # Rastgele bir User-Agent seç ve diğer kapsamlı başlıkları ekle
         headers = {
             'User-Agent': random.choice(USER_AGENTS),
             'Accept-Language': 'en-US,en;q=0.9,tr;q=0.8',
@@ -94,11 +131,10 @@ def extract_medium_text(url: str) -> str:
         }
         
         response = requests.get(url, headers=headers, timeout=20)
-        response.raise_for_status() # HTTP hatalarını (4xx, 5xx) burada yakalar
+        response.raise_for_status() 
 
         soup = BeautifulSoup(response.content, 'html.parser')
         
-        # Medium makale içeriğini hedefleyen seçici
         content_block = soup.find('article') 
         
         if not content_block:
@@ -156,52 +192,114 @@ def summarize_text(text: str) -> str:
         return f"Hata: OpenAI özetleme sırasında bir sorun oluştu. Detay: {e}"
 
 # ----------------------------------------------------
-# 7. API UÇ NOKTASI (ENDPOINT)
+# 7. API UÇ NOKTALARI
 # ----------------------------------------------------
 
 @app.post("/api/summarize")
-async def summarize_endpoint(item: URLItem, db: Session = Depends(get_db)):
+async def summarize_endpoint(
+    item: URLItem, 
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user) # KULLANICI BAĞIMLILIĞI EKLENDİ
+):
     """
-    Verilen Medium URL'sinden metni çıkarır, özetler ve veritabanına kaydeder.
+    Kullanıcının özetleme hakkını kontrol eder, makaleyi özetler ve kaydeder.
     """
+    
+    # 1. ÖZET HAKKI KONTROLÜ
+    if current_user.remaining_summaries <= 0:
+        raise HTTPException(
+            status_code=402, # Payment Required
+            detail=f"Özetleme hakkınız kalmamıştır. Lütfen aboneliğinizi yenileyin. Kullanıcı E-posta: {current_user.email}"
+        )
+    
     if "medium.com" not in item.url:
         raise HTTPException(status_code=400, detail="Lütfen geçerli bir Medium URL'si girin.")
     
-    # 1. Metni Çıkar
+    # 2. Metni Çıkar
     extracted_text = extract_medium_text(item.url)
     
     if extracted_text.startswith("Hata"):
         raise HTTPException(status_code=500, detail=f"Metin Çıkarma Hatası: {extracted_text.replace('Hata: ', '')}")
         
-    # 2. Metni Özetle
+    # 3. Metni Özetle
     summary = summarize_text(extracted_text)
     
     if summary.startswith("Hata"):
         raise HTTPException(status_code=500, detail=f"Özetleme Hatası: {summary.replace('Hata: ', '')}")
     
-    # 3. Özet Verisini Veritabanına Kaydet
+    # 4. Özet Verisini Veritabanına Kaydet ve Hakkı Düşür
     db_summary = Summary(
         original_url=item.url,
         original_text_length=len(extracted_text),
         summary_text=summary,
-        created_at=datetime.utcnow()
+        created_at=datetime.utcnow(),
+        user_id=current_user.id # Hangi kullanıcının özetlediğini kaydet
     )
     db.add(db_summary)
+    
+    # Kullanıcı hakkını düşür
+    current_user.remaining_summaries -= 1
+    db.add(current_user)
+    
     db.commit()
     db.refresh(db_summary) 
     
-    # 4. Başarı Durumu
+    # 5. Başarı Durumu
     return {
         "status": "success",
         "url": item.url,
         "summary": summary,
-        "original_text_length": len(extracted_text),
-        "summary_id": db_summary.id 
+        "remaining_summaries": current_user.remaining_summaries # Kalan hakkı döndür
     }
+
+@app.post("/api/subscribe")
+async def create_subscription(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """
+    Ödeme işlemini simüle eder ve kullanıcının hakkını yeniler.
+    """
+    if not stripe.api_key:
+         raise HTTPException(status_code=500, detail="Ödeme servisi (Stripe) yapılandırılmamış.")
+
+    try:
+        # Gerçek Stripe çağrısı burada olur. (Şu an mock ediyoruz.)
+        
+        current_user.remaining_summaries += 50 # 50 özet hakkı ekle
+        db.add(current_user)
+        db.commit()
+        
+        return {
+            "status": "success", 
+            "message": "Abonelik başarılı! 50 yeni özet hakkınız eklendi.",
+            "remaining_summaries": current_user.remaining_summaries
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ödeme işlemi sırasında bir hata oluştu: {e}")
+
 
 # ----------------------------------------------------
 # 8. KÖK DİZİN ENDPOINT'LERİ VE GEÇMİŞ
 # ----------------------------------------------------
+    
+@app.get("/api/summaries/")
+def get_all_summaries(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """
+    Kullanıcının sadece kendi özetlerini listeler.
+    """
+    # KRİTİK: Sadece oturum açmış kullanıcının özetlerini çeker
+    summaries = db.query(Summary).filter(Summary.user_id == current_user.id).all()
+    
+    results = [
+        {
+            "id": s.id,
+            "url": s.original_url,
+            "summary_preview": s.summary_text[:50] + "...", 
+            "created_at": s.created_at.isoformat()
+        } 
+        for s in summaries
+    ]
+    
+    return {"status": "success", "data": results, "user_email": current_user.email, "remaining_summaries": current_user.remaining_summaries}
+
 
 @app.get("/alive")
 def read_alive():
@@ -218,22 +316,3 @@ async def read_root_info():
         </body>
     </html>
     """
-    
-@app.get("/api/summaries/")
-def get_all_summaries(db: Session = Depends(get_db)):
-    """
-    Veritabanındaki tüm özetleri (geçici olarak) listeler.
-    """
-    summaries = db.query(Summary).all()
-    
-    results = [
-        {
-            "id": s.id,
-            "url": s.original_url,
-            "summary_preview": s.summary_text[:50] + "...", 
-            "created_at": s.created_at.isoformat()
-        } 
-        for s in summaries
-    ]
-    
-    return {"status": "success", "data": results}
