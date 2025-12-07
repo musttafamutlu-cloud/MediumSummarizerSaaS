@@ -1,0 +1,140 @@
+# 📰 Medium Summarizer SaaS
+AI-powered summary generator for Medium articles.  
+This SaaS automatically fetches Medium content, processes it through an LLM, and returns a clean, structured summary.
+
+---
+
+## 🚀 Features
+
+- 🔗 Fetch any public Medium article via URL  
+- 🤖 Summarize using LLM (OpenAI / Gemini / Custom API)  
+- 🗂 Save summaries into a database (SQLite by default)  
+- 🌐 FastAPI or Flask compatible backend  
+- 🧪 API endpoint for programmatic use  
+- 🖥 Simple HTML UI included  
+
+---
+
+## 📁 Project Structure
+
+MediumSummarizerSaaS/
+│── app.py # Main backend application
+│── database.py # DB logic (SQLite or swappable)
+│── index.html # Simple frontend UI
+│── requirements.txt # Dependencies
+│── README.md # Documentation (this file)
+└── .gitignore
+
+
+---
+
+## 🛠 Installation & Setup
+
+### 1️⃣ Clone the project
+```bash
+git clone https://github.com/musttafamutlu-cloud/MediumSummarizerSaaS.git
+cd MediumSummarizerSaaS
+
+2️⃣ Create a virtual environment
+python -m venv venv
+source venv/bin/activate   # Mac / Linux
+venv\Scripts\activate      # Windows
+
+3️⃣ Install dependencies
+pip install -r requirements.txt
+
+4️⃣ Add your API key
+
+Create a .env file:
+
+OPENAI_API_KEY=your_api_key_here
+MODEL=gpt-4o-mini
+
+▶️ Run the Application
+python app.py
+
+
+Backend runs at:
+
+http://127.0.0.1:5000
+
+
+(if FastAPI is added later → localhost:8000/docs)
+
+📡 API Usage
+POST /summarize
+
+Request
+
+{
+  "url": "https://medium.com/some-article"
+}
+
+
+Response
+
+{
+  "title": "Article Title",
+  "summary": "Clean AI-generated summary...",
+  "url": "original_url",
+  "created_at": "2025-01-01T12:00:00"
+}
+
+🗄 Database
+
+SQLite is used by default:
+
+summaries.db
+
+
+If you deploy to production:
+Switch to PostgreSQL → Railway / Supabase / Neon.
+
+☁️ Deployment
+
+This project can be deployed to:
+
+Railway.app (best for Flask/FastAPI + DB)
+
+Render.com
+
+Vercel (serverless FastAPI wrapper)
+
+Fly.io (Docker-based)
+
+Deployment guide will be added soon.
+
+📝 Roadmap
+
+ Convert backend to FastAPI (optional upgrade)
+
+ Add authentication (API Keys / OAuth)
+
+ Add credits-based usage model
+
+ Add subscription model (Stripe)
+
+ Add Chrome Extension
+
+ Add dashboard + summary history
+
+🤝 Contributing
+
+PRs are welcome.
+Feel free to open issues for bugs or feature requests.
+
+📄 License
+
+MIT License.
+
+
+---
+
+# 🎯 Sonraki adım:
+README’yi repo’ya ekle →  
+Sonra **AŞAMA 3: Proje yapısını iyileştirme + kod optimizasyonuna geçiyoruz.**
+
+Hazır olduğunda söyle → **"Aşama 3" yaz** uçalım! 🚀
+
+
+ChatGPT hata yapabilir. Önemli bilgileri kontrol ed
