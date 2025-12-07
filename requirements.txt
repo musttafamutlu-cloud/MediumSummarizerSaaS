@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+requests
+beautifulsoup4
+openai
+sqlalchemy
+pydantic
+stripe  
+python-multipart 
+passlib[bcrypt]
