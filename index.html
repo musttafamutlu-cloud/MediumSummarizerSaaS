@@ -1,224 +1,97 @@
 <!DOCTYPE html>
-<html lang="tr">
+<html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Medium Özetleyici SaaS (MVP)</title>
-    <style>
-        /* Minimalist CSS */
-        body {
-            font-family: Arial, sans-serif;
-            margin: 0;
-            padding: 20px;
-            background-color: #f4f4f9;
-            color: #333;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            min-height: 100vh;
-        }
-        .container {
-            width: 100%;
-            max-width: 800px;
-            background-color: #fff;
-            padding: 30px;
-            border-radius: 12px;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
-            margin-bottom: 20px;
-        }
-        h1 {
-            color: #007bff;
-            text-align: center;
-            margin-bottom: 30px;
-        }
-        form {
-            display: flex;
-            gap: 10px;
-            margin-bottom: 20px;
-        }
-        input[type="url"] {
-            flex-grow: 1;
-            padding: 12px;
-            border: 1px solid #ccc;
-            border-radius: 8px;
-            font-size: 16px;
-        }
-        button {
-            padding: 12px 20px;
-            background-color: #28a745;
-            color: white;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            font-size: 16px;
-            transition: background-color 0.3s;
-        }
-        button:hover {
-            background-color: #218838;
-        }
-        .result-box {
-            margin-top: 20px;
-            padding: 20px;
-            border: 1px solid #ddd;
-            border-radius: 8px;
-            background-color: #e9ecef;
-            white-space: pre-wrap;
-            min-height: 100px;
-        }
-        .history-box {
-            border: 1px solid #007bff;
-            padding: 15px;
-            border-radius: 8px;
-            background-color: #e6f7ff;
-            margin-top: 15px;
-        }
-        .history-box ul {
-            list-style-type: none;
-            padding: 0;
-        }
-        .history-box li {
-            border-bottom: 1px dashed #b3d9ff;
-            padding: 10px 0;
-        }
-        .loading {
-            border: 4px solid #f3f3f3;
-            border-top: 4px solid #007bff;
-            border-radius: 50%;
-            width: 30px;
-            height: 30px;
-            animation: spin 1s linear infinite;
-            display: none;
-            margin: 10px auto;
-        }
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-        .error {
-            color: #dc3545;
-            font-weight: bold;
-            margin-top: 10px;
-        }
-    </style>
+  <meta charset="UTF-8" />
+  <title>Medium Article Summarizer</title>
+
+  <!-- Tailwind -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <style>
+    body {
+      background: #f5f7fa;
+    }
+  </style>
 </head>
-<body>
-    <div class="container">
-        <h1>🚀 Medium Makale Özetleyici (AI Destekli SaaS)</h1>
-        <p>Medium makalesinin URL'sini girin ve yapay zeka tarafından özetlenmiş halini saniyeler içinde alın.</p>
-        
-        <form id="summarizeForm">
-            <input type="url" id="mediumUrl" placeholder="Medium URL'sini buraya yapıştırın (https://medium.com/...)" required>
-            <button type="submit" id="submitButton">Özetle</button>
-        </form>
 
-        <div id="loadingIndicator" class="loading"></div>
-        <p id="errorMessage" class="error"></p>
-        
-        <h2>Özet Sonucu</h2>
-        <div id="summaryResult" class="result-box">
-            Henüz bir özet yapılmadı.
-        </div>
+<body class="flex justify-center items-center min-h-screen">
+
+  <div class="w-full max-w-xl bg-white shadow-xl rounded-2xl p-8">
+    <h1 class="text-3xl font-bold mb-6 text-center text-gray-800">
+      Medium Article Summarizer
+    </h1>
+
+    <!-- URL Input -->
+    <label class="block text-sm font-medium mb-2 text-gray-600">Medium URL</label>
+    <input id="urlInput"
+           class="w-full border border-gray-300 p-3 rounded-md mb-4 focus:ring focus:ring-blue-300 focus:border-blue-400"
+           placeholder="https://medium.com/article-link">
+
+    <!-- Summarize Button -->
+    <button onclick="summarize()"
+            id="btn"
+            class="w-full bg-blue-600 hover:bg-blue-700 text-white p-3 rounded-md font-semibold transition">
+      Summarize Article
+    </button>
+
+    <!-- Loading -->
+    <div id="loading" class="hidden text-center mt-4 text-gray-600">
+      ⏳ Processing... Please wait.
     </div>
 
-    <div class="container history-box">
-        <h2>💾 Özet Geçmişi (Veritabanından)</h2>
-        <button onclick="loadSummaries()" id="loadButton" style="background-color: #007bff;">Geçmişi Yükle</button>
-        <div id="historyResult" style="margin-top: 10px;">
-            Lütfen geçmişi yüklemek için butona basın.
-        </div>
+    <!-- Result -->
+    <div id="resultBox" class="hidden mt-6 bg-gray-50 p-4 rounded-md border">
+      <h2 class="font-semibold mb-2 text-gray-800">Summary:</h2>
+      <p id="resultText" class="whitespace-pre-line text-sm text-gray-700"></p>
     </div>
 
-    <script>
-        // ÖZETLEME İŞLEMİ
-        document.getElementById('summarizeForm').addEventListener('submit', async function(event) {
-            event.preventDefault(); 
-            
-            const url = document.getElementById('mediumUrl').value;
-            const resultBox = document.getElementById('summaryResult');
-            const loading = document.getElementById('loadingIndicator');
-            const errorMsg = document.getElementById('errorMessage');
-            const submitButton = document.getElementById('submitButton');
+    <!-- Error -->
+    <div id="errorBox" class="hidden mt-6 bg-red-50 p-4 rounded-md border border-red-300">
+      <p id="errorText" class="text-red-700 text-sm"></p>
+    </div>
+  </div>
 
-            resultBox.innerHTML = 'İçerik çekiliyor ve yapay zeka özetliyor... Lütfen bekleyin.';
-            errorMsg.textContent = '';
-            loading.style.display = 'block';
-            submitButton.disabled = true; 
-            
-            try {
-                const apiUrl = 'http://127.0.0.1:8000/api/summarize'; 
 
-                const response = await fetch(apiUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ url: url })
-                });
+  <script>
+    async function summarize() {
+      const url = document.getElementById("urlInput").value;
 
-                const data = await response.json();
+      if (!url) {
+        alert("Please enter a Medium URL.");
+        return;
+      }
 
-                if (!response.ok) {
-                    const errorMessage = data.detail || 'Bilinmeyen bir hata oluştu.';
-                    errorMsg.textContent = 'Hata: ' + errorMessage + ' (API Durum Kodu: ' + response.status + ')';
-                    resultBox.innerHTML = 'Özetleme başarısız oldu.';
-                } else {
-                    resultBox.innerHTML = data.summary;
-                    // Yeni özet geldikten sonra geçmişi yenile
-                    loadSummaries(); 
-                }
+      document.getElementById("loading").classList.remove("hidden");
+      document.getElementById("resultBox").classList.add("hidden");
+      document.getElementById("errorBox").classList.add("hidden");
 
-            } catch (error) {
-                errorMsg.textContent = 'Bağlantı Hatası: Backend API\'sine ulaşılamıyor.';
-                resultBox.innerHTML = 'Lütfen Uvicorn sunucusunun çalıştığından emin olun.';
-            } finally {
-                loading.style.display = 'none';
-                submitButton.disabled = false; 
-            }
+      try {
+        const response = await fetch("http://127.0.0.1:8000/api/summarize", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url })
         });
 
-        // ÖZET GEÇMİŞİNİ YÜKLEME İŞLEMİ (YENİ)
-        async function loadSummaries() {
-            const historyResult = document.getElementById('historyResult');
-            const loadButton = document.getElementById('loadButton');
+        const data = await response.json();
 
-            historyResult.innerHTML = "Geçmiş yükleniyor...";
-            loadButton.disabled = true;
-
-            try {
-                const response = await fetch('http://127.0.0.1:8000/api/summaries/', {
-                    method: 'GET'
-                });
-
-                const data = await response.json();
-
-                if (response.ok && data.data) {
-                    if (data.data.length === 0) {
-                        historyResult.innerHTML = "Veritabanında kayıtlı özet bulunamadı.";
-                        return;
-                    }
-                    
-                    let html = '<ul>';
-                    data.data.forEach(item => {
-                        html += `<li>
-                                    <strong>ID ${item.id}</strong> (${item.created_at.split('T')[0]})
-                                    <br>
-                                    <a href="${item.url}" target="_blank">Makaleye Git</a>
-                                    <br>
-                                    Önizleme: ${item.summary_preview}
-                                 </li>`;
-                    });
-                    html += '</ul>';
-                    historyResult.innerHTML = html;
-                } else {
-                    historyResult.innerHTML = "Geçmiş yüklenirken bir hata oluştu.";
-                }
-            } catch (error) {
-                historyResult.innerHTML = "API'ye bağlanılamadı. Backend çalışıyor mu?";
-            } finally {
-                loadButton.disabled = false;
-            }
+        if (!response.ok) {
+          document.getElementById("loading").classList.add("hidden");
+          document.getElementById("errorText").innerText = data.detail || "An unexpected error occurred.";
+          document.getElementById("errorBox").classList.remove("hidden");
+          return;
         }
-        
-        // Sayfa yüklendiğinde geçmişi otomatik olarak yükle
-        window.onload = loadSummaries;
-    </script>
+
+        document.getElementById("loading").classList.add("hidden");
+        document.getElementById("resultText").innerText = data.summary;
+        document.getElementById("resultBox").classList.remove("hidden");
+
+      } catch (err) {
+        document.getElementById("loading").classList.add("hidden");
+        document.getElementById("errorText").innerText = "Network error: " + err;
+        document.getElementById("errorBox").classList.remove("hidden");
+      }
+    }
+  </script>
+
 </body>
 </html>
