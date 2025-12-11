@@ -1,50 +1,59 @@
 from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy.orm import Session
 from fastapi.responses import HTMLResponse
+from sqlalchemy.orm import Session
 from datetime import datetime
-
 import requests
 from bs4 import BeautifulSoup
 import os
-from dotenv import load_dotenv
 
+from dotenv import load_dotenv
 from groq import Groq
 
-# -------------------------------------------------------------
-# .env yükle
-# -------------------------------------------------------------
-env_path = r"C:\Users\musta\OneDrive\Masaüstü\saas1\.env"
-load_dotenv(env_path)
-
-# -------------------------------------------------------------
-# DATABASE
-# -------------------------------------------------------------
 from database import SessionLocal, Summary, create_db_tables
 
+# ----------------------------
+# LOAD ENV
+# ----------------------------
+load_dotenv()
+
+SCRAPER_API_KEY = os.getenv("SCRAPER_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+
+print("SCRAPER KEY:", SCRAPER_API_KEY)
+print("GROQ KEY:", GROQ_API_KEY)
+
+# ----------------------------
+# GROQ CLIENT
+# ----------------------------
+groq_client = Groq(api_key=GROQ_API_KEY)
+
+# ----------------------------
+# FASTAPI SETUP
+# ----------------------------
 create_db_tables()
 app = FastAPI()
-
 
 class URLItem(BaseModel):
     url: str
 
 
-# -------------------------------------------------------------
+# ----------------------------
 # CORS
-# -------------------------------------------------------------
+# ----------------------------
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
-# -------------------------------------------------------------
-# DB DEP
-# -------------------------------------------------------------
+# ----------------------------
+# DB CONNECTOR
+# ----------------------------
 def get_db():
     db = SessionLocal()
     try:
@@ -53,28 +62,14 @@ def get_db():
         db.close()
 
 
-# -------------------------------------------------------------
-# GROQ CLIENT
-# -------------------------------------------------------------
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-
-if not GROQ_API_KEY:
-    raise RuntimeError("GROQ_API_KEY Bulunamadı!")
-
-groq_client = Groq(api_key=GROQ_API_KEY)
-
-print("🔥 GROQ AKTİF MODEL:", "llama-3.1-8b-instant")
-
-
-# -------------------------------------------------------------
-# SCRAPERAPI - MEDIUM SCRAPER
-# -------------------------------------------------------------
+# ----------------------------
+# SCRAPERAPI → MEDIUM SCRAPING
+# ----------------------------
 def extract_medium_text(url: str) -> str:
-    api_key = os.getenv("SCRAPER_API_KEY")
-    if not api_key:
-        return "Hata: SCRAPER_API_KEY eksik!"
+    if not SCRAPER_API_KEY:
+        return "Hata: SCRAPER_API_KEY bulunamadı."
 
-    proxy_url = f"http://api.scraperapi.com?api_key={api_key}&url={url}"
+    proxy_url = f"http://api.scraperapi.com/?api_key={SCRAPER_API_KEY}&url={url}"
 
     try:
         response = requests.get(proxy_url, timeout=60)
@@ -82,60 +77,58 @@ def extract_medium_text(url: str) -> str:
 
         soup = BeautifulSoup(response.text, "html.parser")
         article = soup.find("article")
+
         if not article:
-            return "Hata: Yazı bulunamadı."
+            return "Hata: Medium makalesi bulunamadı."
 
         parts = []
         for tag in article.find_all(["p", "h1", "h2", "h3", "li"]):
-            t = tag.get_text(strip=True)
-            if t:
-                parts.append(t)
+            text = tag.get_text(strip=True)
+            if text:
+                parts.append(text)
 
         full_text = "\n\n".join(parts)
-        return full_text if len(full_text) > 50 else "Hata: Metin çok kısa."
+        return full_text if len(full_text) > 50 else "Hata: Çıkarılan metin çok kısa."
 
     except Exception as e:
         return f"Hata: Medium alınamadı → {e}"
 
 
-# -------------------------------------------------------------
-# GROQ SUMMARY
-# -------------------------------------------------------------
+# ----------------------------
+# GROQ → SUMMARIZER
+# ----------------------------
 def summarize_text(text: str) -> str:
     try:
-        response = groq_client.chat.completions.create(
+        completion = groq_client.chat.completions.create(
             model="llama-3.1-8b-instant",
             messages=[
-                {"role": "system", "content": "Sen profesyonel bir özetleyicisin."},
-                {"role": "user",
-                 "content": f"Aşağıdaki metni Türkçe, kısa ve maddeler halinde özetle:\n\n{text[:15000]}"}
-            ],
-            temperature=0.3,
-            max_tokens=512
+                {"role": "system", "content": "Summarize the following text in English in short bullet points."},
+                {"role": "user", "content": text[:15000]},
+            ]
         )
 
-        # 🔥 Doğru erişim şekli (Groq objesi)
-        return response.choices[0].message.content
+        # 🔥 DOĞRU ERİŞİM
+        return completion.choices[0].message.content
 
     except Exception as e:
-        return f"Hata: Groq özetleme başarısız → {e}"
+        raise HTTPException(status_code=500, detail=f"Hata: Groq özetleme başarısız → {e}")
 
 
-# -------------------------------------------------------------
-# ENDPOINT
-# -------------------------------------------------------------
+
+# ----------------------------
+# POST /api/summarize
+# ----------------------------
 @app.post("/api/summarize")
 def summarize_endpoint(item: URLItem, db: Session = Depends(get_db)):
+
     if "medium.com" not in item.url.lower():
-        raise HTTPException(400, "Lütfen Medium URL girin.")
+        raise HTTPException(status_code=400, detail="Please enter a valid Medium URL.")
 
     extracted = extract_medium_text(item.url)
     if extracted.startswith("Hata"):
-        raise HTTPException(500, extracted)
+        raise HTTPException(status_code=500, detail=extracted)
 
     summary = summarize_text(extracted)
-    if summary.startswith("Hata"):
-        raise HTTPException(500, summary)
 
     db_entry = Summary(
         original_url=item.url,
@@ -143,15 +136,53 @@ def summarize_endpoint(item: URLItem, db: Session = Depends(get_db)):
         summary_text=summary,
         created_at=datetime.utcnow()
     )
+
     db.add(db_entry)
     db.commit()
+    db.refresh(db_entry)
 
-    return {"status": "success", "summary": summary}
+    return {"status": "success", "url": item.url, "summary": summary}
 
 
-# -------------------------------------------------------------
+# ----------------------------
+# GET HISTORY
+# ----------------------------
+@app.get("/api/history")
+def get_history(db: Session = Depends(get_db)):
+
+    items = db.query(Summary).order_by(Summary.id.desc()).all()
+
+    return [
+        {
+            "id": item.id,
+            "original_url": item.original_url,
+            "summary_text": item.summary_text,
+            "created_at": item.created_at.isoformat()
+        }
+        for item in items
+    ]
+
+
+# ----------------------------
+# DELETE /api/delete/{id}
+# ----------------------------
+@app.delete("/api/delete/{item_id}")
+def delete_summary(item_id: int, db: Session = Depends(get_db)):
+
+    item = db.query(Summary).filter(Summary.id == item_id).first()
+
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    db.delete(item)
+    db.commit()
+    return {"status": "deleted"}
+
+
+# ----------------------------
 # ROOT
-# -------------------------------------------------------------
+# ----------------------------
 @app.get("/")
 def root():
-    return {"status": "OK", "message": "Groq Summarizer çalışıyor!"}
+    return {"status": "OK", "message": "Medium Summarizer API running 🎉"}
+
